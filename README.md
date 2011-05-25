@@ -135,7 +135,6 @@ To configure jammit-s3 to use asset versioning for CloudFront, simply add the fo
     use_cloudfront: version
     cloudfront_dist_id: XXXXXXXXXXXXXX  # <- optional, not used for versioning
     cloudfront_domain: xyzxyxyz.cloudfront.net
-    cloudfront_cname: static.yourdomain.com # <- this is optional, and CF distribution needs to be configured for CNAMEs
 
 When configured for asset versioning, jammit-s3 inserts a cache busting token right
 in the asset path, causing browsers and cacheing proxies to refetch it
@@ -148,6 +147,22 @@ the value of ENV['RAILS_ASSET_ID'] on your application server.
 It is up to you to come up with a strategy which value to use as
 RAILS_ASSET_ID, the git commit hash seems like a good option, but
 anything relatively unique, like a timestamp will do.
+
+#### Assets CNAME Distro ####
+
+To configure asset versioning with a single CNAME, simple add the following setting to config/assets.yml:
+
+    cloudfront_cname: static.yourdomain.com # <- this is optional, and CF distribution needs to be configured for CNAMEs
+
+Although if you would like you use multiple CNAME's you can set the following in the config/assets.yml:
+
+    cloudfront_cname:
+      - static1.yourdomain.com
+      - static2.yourdomain.com
+      - static3.yourdomain.com
+
+When configured this way, your assets are distributed, by source.hash number for all your assets spanning all of the CNAME's
+provided.
 
 #### Deployment
 
@@ -206,7 +221,7 @@ Cache-Control setting. You can specify the value Amazon CloudFront will
 use serving your assets by setting s3_cache_control config setting in
 assets.yml:
 
-   s3_cache_control: public, max-age=<%= 365 * 24 * 60 * 60 %> 
+   s3_cache_control: public, max-age=<%= 365 * 24 * 60 * 60 %>
 
 This will cause Cache-Control response header to be set to 1 year
 expiration.
