@@ -1,4 +1,4 @@
-require 's3'
+require 'aws/s3'
 module Jammit
   class S3CommandLine < CommandLine
     def initialize
@@ -7,8 +7,7 @@ module Jammit
 
       begin
         Jammit.upload_to_s3!
-      rescue S3::Error::BucketAlreadyExists => e
-        # tell them to pick another name
+      rescue AWS::S3::S3Exception => e
         puts e.message
         exit(1)
       end

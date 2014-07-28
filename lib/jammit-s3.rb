@@ -23,9 +23,11 @@ module Jammit
         # to override these values inside config/environments/production.rb.
         if self.use_s3_asset_host?
           config.action_controller.asset_host = self.asset_host_proc
+          config.action_mailer.asset_host     = self.asset_host_proc
         end
         if self.use_versioned_assets?
           config.action_controller.asset_path = self.asset_path_proc
+          config.action_mailer.asset_path     = self.asset_path_proc
         end
       end
     end

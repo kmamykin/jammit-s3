@@ -8,6 +8,7 @@ require 'digest/md5'
 
 module Jammit
   class S3Uploader
+    include AWS::S3
     include Jammit::S3AssetsVersioning
 
     def initialize(options = { })
@@ -18,7 +19,8 @@ module Jammit
         @secret_access_key = options[:secret_access_key] || Jammit.configuration[:s3_secret_access_key]
         @bucket_location = options[:bucket_location] || Jammit.configuration[:s3_bucket_location]
         @cache_control = options[:cache_control] || Jammit.configuration[:s3_cache_control]
-        @acl = options[:acl] || Jammit.configuration[:s3_permission]
+        @expires = options[:expires] || Jammit.configuration[:s3_expires]
+        @acl = options[:acl] || Jammit.configuration[:s3_permission] || :public_read
 
         @bucket = find_or_create_bucket
         if use_invalidation?
@@ -75,28 +77,28 @@ module Jammit
 
         if use_versioned_assets?  # upload ALL files with version prepended
           remote_path = versioned_path(remote_path, true)
+        end
+
+        # selectively upload files if local version is different
+        # check if the file already exists on s3
+        begin
+          obj = @bucket[remote_path]
+        rescue
+          obj = nil
+        end
+
+        # if the object does not exist, or if the MD5 Hash / etag of the
+        # file has changed, upload it
+        if !obj || (obj.etag != Digest::MD5.hexdigest(File.read(local_path)))
+
           upload_file local_path, remote_path, use_gzip
-        else # selectively upload files if local version is different
-          # check if the file already exists on s3
-          begin
-            obj = @bucket.objects.find_first(remote_path)
-          rescue
-            obj = nil
+
+          if use_invalidation? && obj
+            log "File changed and will be invalidated in cloudfront: #{remote_path}"
+            @changed_files << remote_path
           end
-
-          # if the object does not exist, or if the MD5 Hash / etag of the
-          # file has changed, upload it
-          if !obj || (obj.etag != Digest::MD5.hexdigest(File.read(local_path)))
-
-            upload_file local_path, remote_path, use_gzip
-
-            if use_invalidation? && obj
-              log "File changed and will be invalidated in cloudfront: #{remote_path}"
-              @changed_files << remote_path
-            end
-          else
-            log "file has not changed: #{remote_path}"
-          end
+        else
+          log "file has not changed: #{remote_path}"
         end
       end
     end
@@ -104,28 +106,27 @@ module Jammit
     def upload_file(local_path, remote_path, use_gzip)
       # save to s3
       log "#{local_path.gsub(/^#{ASSET_ROOT}\/public\//, "")} => #{remote_path}"
-      new_object = @bucket.objects.build(remote_path)
-      new_object.cache_control = @cache_control if @cache_control
-      new_object.content_type = MimeMagic.by_path(remote_path)
-      new_object.content = open(local_path)
-      new_object.content_encoding = "gzip" if use_gzip
-      new_object.acl = @acl if @acl
-      new_object.save
+      new_object, options = @bucket.new_object, {}
+      new_object.key = remote_path
+      new_object.value = open(local_path).read
+      options[:cache_control] = @cache_control if @cache_control
+      options[:content_type] = MimeMagic.by_path(remote_path)
+      options[:content_encoding] = "gzip" if use_gzip
+      options[:expires] = @expires if @expires
+      options[:access] = @acl if @acl
+      new_object.store(options)
     end
 
     def find_or_create_bucket
-      s3_service = S3::Service.new(:access_key_id => @access_key_id, :secret_access_key => @secret_access_key)
+      AWS::S3::Base.establish_connection!(:access_key_id => @access_key_id, :secret_access_key => @secret_access_key)
 
       # find or create the bucket
       begin
-        s3_service.buckets.find(@bucket_name)
-      rescue S3::Error::NoSuchBucket
+        Bucket.find(@bucket_name)
+      rescue AWS::S3::NoSuchBucket
         log "Bucket not found. Creating '#{@bucket_name}'..."
-        bucket = s3_service.buckets.build(@bucket_name)
-
-        location = (@bucket_location.to_s.strip.downcase == "eu") ? :eu : :us
-        bucket.save(location)
-        bucket
+        Bucket.create(@bucket_name, :access => @acl.to_sym)
+        Bucket.find(@bucket_name)
       end
     end
 
